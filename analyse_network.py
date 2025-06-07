@@ -20,6 +20,35 @@ class AnalyzeNetwork:
         except VendorNotFoundError:
             return "Unknown"
 
+    def _calculate_windows_vs_linux_score(self, info: dict) -> int:
+        score = 0
+
+        if info["ICMP_PACKET_LEN"] != "Unknown":
+            if info["ICMP_PACKET_LEN"] == 98:
+                score += 1
+            elif info["ICMP_PACKET_LEN"] == 74:
+                score -= 1
+
+        if info["ICMP_PACKET_ID"] != "Unknown":
+            if info["ICMP_PACKET_ID"] != 1:
+                score += 1
+            else:
+                score -= 1
+
+        if info["ICMP_PACKET_SEQ"] != "Unknown":
+            if info["ICMP_PACKET_SEQ"] == 1:
+                score += 1
+            else:
+                score -= 1
+
+        if info["DEFULT_TTL"] != "Unknown":
+            if 62 <= info["DEFULT_TTL"] <= 64:
+                score += 1
+            elif 126 <= info["DEFULT_TTL"] <= 128:
+                score -= 1
+
+        return score
+
     def get_ips(self) -> list[str]:
         """returns a list of ip addresses (strings) that appear in
         the pcap"""
@@ -49,12 +78,11 @@ class AnalyzeNetwork:
         return list(macs)
 
     def guess_os(self, info: dict) -> str:
-        if info["DEFULT_TTL"] != "Unknown":
-            if 126 <= info["DEFULT_TTL"] <= 128:
-                return "Windows"
-
-            if 62 <= info["DEFULT_TTL"] <= 64:
-                return "Linux"
+        score = self._calculate_windows_vs_linux_score(info)
+        if score > 0:
+            return "Linux"
+        elif score < 0:
+            return "Windows"
         return "Unknown"
 
     def get_info_by_mac(self, mac: str) -> dict | None:
@@ -66,6 +94,9 @@ class AnalyzeNetwork:
         info["IP"] = "Unknown"
         info["VENDOR"] = self._get_vendor(mac)
         info["DEFULT_TTL"] = "Unknown"
+        info["ICMP_PACKET_LEN"] = "Unknown"
+        info["ICMP_PACKET_ID"] = "Unknown"
+        info["ICMP_PACKET_SEQ"] = "Unknown"
 
         for packet in self.scapy_pcap:
             if (
@@ -79,6 +110,10 @@ class AnalyzeNetwork:
                 if packet["Ether"].src == mac and self._is_private_ip(packet["IP"].src):
                     info["IP"] = packet["IP"].src
                     info["DEFULT_TTL"] = packet["IP"].ttl
+                    if packet.haslayer("ICMP"):
+                        info["ICMP_PACKET_LEN"] = len(packet)
+                        info["ICMP_PACKET_ID"] = packet["ICMP"].id
+                        info["ICMP_PACKET_SEQ"] = packet["ICMP"].seq
 
                 if packet["Ether"].dst == mac and self._is_private_ip(packet["IP"].dst):
                     info["IP"] = packet["IP"].dst
@@ -111,6 +146,10 @@ class AnalyzeNetwork:
                 if packet["IP"].src == ip:
                     info["MAC"] = packet["Ether"].src
                     info["DEFULT_TTL"] = packet["IP"].ttl
+                    if packet.haslayer("ICMP"):
+                        info["ICMP_PACKET_LEN"] = len(packet)
+                        info["ICMP_PACKET_ID"] = packet["ICMP"].id
+                        info["ICMP_PACKET_SEQ"] = packet["ICMP"].seq
 
                 if packet["IP"].dst == ip:
                     info["MAC"] = packet["Ether"].dst
@@ -150,5 +189,5 @@ class AnalyzeNetwork:
 
 
 if __name__ == "__main__":
-    my_analyzer = AnalyzeNetwork("pcap-01.pcapng")
+    my_analyzer = AnalyzeNetwork("pcap-02.pcapng")
     print(json.dumps(my_analyzer.get_info(), indent=4))
