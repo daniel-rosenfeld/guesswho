@@ -48,13 +48,24 @@ class AnalyzeNetwork:
 
         return list(macs)
 
+    def guess_os(self, info: dict) -> str:
+        if info["DEFULT_TTL"] != "Unknown":
+            if 126 <= info["DEFULT_TTL"] <= 128:
+                return "Windows"
+
+            if 62 <= info["DEFULT_TTL"] <= 64:
+                return "Linux"
+        return "Unknown"
+
     def get_info_by_mac(self, mac: str) -> dict | None:
         if mac == "ff:ff:ff:ff:ff:ff":
             return None
+
         info = dict()
         info["MAC"] = mac
         info["IP"] = "Unknown"
         info["VENDOR"] = self._get_vendor(mac)
+        info["DEFULT_TTL"] = "Unknown"
 
         for packet in self.scapy_pcap:
             if (
@@ -63,17 +74,16 @@ class AnalyzeNetwork:
                 and mac == packet["ARP"].hwsrc
             ):
                 info["IP"] = packet["ARP"].psrc
-                break
 
             if packet.haslayer("Ether") and packet.haslayer("IP"):
                 if packet["Ether"].src == mac and self._is_private_ip(packet["IP"].src):
                     info["IP"] = packet["IP"].src
-                    break
+                    info["DEFULT_TTL"] = packet["IP"].ttl
 
                 if packet["Ether"].dst == mac and self._is_private_ip(packet["IP"].dst):
                     info["IP"] = packet["IP"].dst
-                    break
 
+        info["GUESSED_OS"] = self.guess_os(info)
         return info
 
     def get_info_by_ip(self, ip: str) -> dict:
@@ -83,7 +93,7 @@ class AnalyzeNetwork:
         info = dict()
         info["MAC"] = "Unknown"
         info["IP"] = ip
-        info["VENDOR"] = "Unknown"
+        info["DEFULT_TTL"] = "Unknown"
 
         if not self._is_private_ip(ip):
             return info
@@ -96,19 +106,17 @@ class AnalyzeNetwork:
             ):
                 info["MAC"] = packet["ARP"].hwsrc
                 info["VENDOR"] = self._get_vendor(packet["ARP"].hwsrc)
-                break
 
             if packet.haslayer("Ether") and packet.haslayer("IP"):
                 if packet["IP"].src == ip:
                     info["MAC"] = packet["Ether"].src
-                    info["VENDOR"] = self._get_vendor(packet["Ether"].src)
-                    break
+                    info["DEFULT_TTL"] = packet["IP"].ttl
 
                 if packet["IP"].dst == ip:
                     info["MAC"] = packet["Ether"].dst
-                    info["VENDOR"] = self._get_vendor(packet["Ether"].dst)
-                    break
 
+        info["VENDOR"] = self._get_vendor(info["MAC"])
+        info["GUESSED_OS"] = self.guess_os(info)
         return info
 
     def get_info(self) -> list[dict]:
@@ -124,7 +132,7 @@ class AnalyzeNetwork:
             info_by_ip.append(self.get_info_by_ip(ip))
 
         info_list = info_by_mac
-        seen_devices = set()
+        seen_devices = set([frozenset(info) for info in info_list])
 
         for info in info_by_ip:
             frozen_info = frozenset(info)
@@ -142,5 +150,5 @@ class AnalyzeNetwork:
 
 
 if __name__ == "__main__":
-    my_analyzer = AnalyzeNetwork("pcap-00.pcapng")
+    my_analyzer = AnalyzeNetwork("pcap-01.pcapng")
     print(json.dumps(my_analyzer.get_info(), indent=4))
