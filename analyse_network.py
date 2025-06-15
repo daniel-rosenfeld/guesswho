@@ -17,8 +17,42 @@ class AnalyzeNetwork:
     def _get_vendor(self, mac: str):
         try:
             return MacLookup().lookup(mac)
-        except VendorNotFoundError:
+        except Exception:
             return "Unknown"
+
+    def _initiate_info(self, mac: str = "Unknown", ip: str = "Unknown") -> dict:
+        info = dict()
+        info["MAC"] = mac
+        info["IP"] = ip
+        info["VENDOR"] = self._get_vendor(mac)
+        info["DEFULT_TTL"] = "Unknown"
+        info["ICMP_PACKET_LEN"] = "Unknown"
+        info["ICMP_PACKET_ID"] = "Unknown"
+        info["ICMP_PACKET_SEQ"] = "Unknown"
+        info["USING_HTTP"] = "False"
+        info["USING_HTTPS"] = "False"
+        info["USING_DNS"] = "False"
+        return info
+
+    def _check_and_update_info(self, info: dict, packet: Packet) -> dict:
+        if (
+            packet.haslayer("ICMP")
+            and packet["ICMP"].type == 8
+            and info["ICMP_PACKET_LEN"] != "Unknwon"
+        ):
+            info["ICMP_PACKET_LEN"] = len(packet)
+            info["ICMP_PACKET_ID"] = packet["ICMP"].id
+            info["ICMP_PACKET_SEQ"] = packet["ICMP"].seq
+        elif packet.haslayer("TCP"):
+            if (
+                packet["TCP"].dport == 80
+                or packet.haslayer("Raw")
+                and b"HTTP" in packet["Raw"].load
+            ):
+                info["USING_HTTP"] = "True"
+            elif packet["TCP"].dport == 443:
+                info["USING_HTTPS"] = "True"
+        return info
 
     def _calculate_windows_vs_linux_score(self, info: dict) -> int:
         score = 0
@@ -89,14 +123,7 @@ class AnalyzeNetwork:
         if mac == "ff:ff:ff:ff:ff:ff":
             return None
 
-        info = dict()
-        info["MAC"] = mac
-        info["IP"] = "Unknown"
-        info["VENDOR"] = self._get_vendor(mac)
-        info["DEFULT_TTL"] = "Unknown"
-        info["ICMP_PACKET_LEN"] = "Unknown"
-        info["ICMP_PACKET_ID"] = "Unknown"
-        info["ICMP_PACKET_SEQ"] = "Unknown"
+        info = self._initiate_info(mac=mac)
 
         for packet in self.scapy_pcap:
             if (
@@ -110,10 +137,7 @@ class AnalyzeNetwork:
                 if packet["Ether"].src == mac and self._is_private_ip(packet["IP"].src):
                     info["IP"] = packet["IP"].src
                     info["DEFULT_TTL"] = packet["IP"].ttl
-                    if packet.haslayer("ICMP"):
-                        info["ICMP_PACKET_LEN"] = len(packet)
-                        info["ICMP_PACKET_ID"] = packet["ICMP"].id
-                        info["ICMP_PACKET_SEQ"] = packet["ICMP"].seq
+                    info = self._check_and_update_info(info, packet)
 
                 if packet["Ether"].dst == mac and self._is_private_ip(packet["IP"].dst):
                     info["IP"] = packet["IP"].dst
@@ -125,10 +149,7 @@ class AnalyzeNetwork:
         """returns a dict with all information about the device with
         given IP address"""
 
-        info = dict()
-        info["MAC"] = "Unknown"
-        info["IP"] = ip
-        info["DEFULT_TTL"] = "Unknown"
+        info = self._initiate_info(ip=ip)
 
         if not self._is_private_ip(ip):
             return info
@@ -146,10 +167,7 @@ class AnalyzeNetwork:
                 if packet["IP"].src == ip:
                     info["MAC"] = packet["Ether"].src
                     info["DEFULT_TTL"] = packet["IP"].ttl
-                    if packet.haslayer("ICMP"):
-                        info["ICMP_PACKET_LEN"] = len(packet)
-                        info["ICMP_PACKET_ID"] = packet["ICMP"].id
-                        info["ICMP_PACKET_SEQ"] = packet["ICMP"].seq
+                    info = self._check_and_update_info(info, packet)
 
                 if packet["IP"].dst == ip:
                     info["MAC"] = packet["Ether"].dst
@@ -189,5 +207,5 @@ class AnalyzeNetwork:
 
 
 if __name__ == "__main__":
-    my_analyzer = AnalyzeNetwork("pcap-02.pcapng")
+    my_analyzer = AnalyzeNetwork("pcap-03.pcapng")
     print(json.dumps(my_analyzer.get_info(), indent=4))
